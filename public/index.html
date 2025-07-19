@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Поиск геймпассов по нику</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 2rem;
+        }
+
+        input,
+        button {
+            padding: 0.5rem;
+            margin: 0.5rem 0;
+        }
+
+        .gp-line {
+            display: flex;
+            gap: 10px;
+            margin: 4px 0;
+            align-items: center;
+            font-family: monospace;
+        }
+
+        .link-part,
+        .price-part {
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 4px;
+            user-select: none;
+            white-space: nowrap;
+        }
+
+        .link-part:hover {
+            background: #d0f0ff;
+        }
+
+        .price-part:hover {
+            background: #ffdada;
+        }
+
+        .calc-section {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #ccc;
+        }
+
+        pre {
+            background: #f0f0f0;
+            padding: 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- 🔢 Вставка калькулятора -->
+    <div class="calc-section">
+        <h2>🧮 Калькулятор цены геймпасса</h2>
+        <label for="num">Введите сумму, которую вы хотите получить:</label>
+        <input type="number" id="num" placeholder="например, 700" min="1">
+
+        <label for="balance">Текущий баланс робуксов на аккаунте:</label>
+        <input type="number" id="balance" placeholder="например, 10000" min="1" value="10000">
+
+        <pre id="result">Ожидание ввода...</pre>
+        <small>💡 Нажмите на серый блок, чтобы скопировать результат</small>
+    </div>
+
+    <!-- 🔍 Поиск геймпассов -->
+    <h2>🔍 Поиск геймпассов по нику</h2>
+    <input id="nickname" placeholder="Ник (например: owl4221)">
+    <button onclick="findGamepasses()">Искать</button>
+
+    <div id="output"></div>
+
+    <script>
+        // --- Калькулятор ---
+        const numInput = document.getElementById('num');
+    const balanceInput = document.getElementById('balance');
+    const resultEl = document.getElementById('result');
+
+    function calculate() {
+        const num = parseFloat(numInput.value);
+        const balanceRobux = parseFloat(balanceInput.value);
+        let msg = '';
+
+        if (isNaN(num) || num <= 0 || isNaN(balanceRobux) || balanceRobux <= 0) {
+            resultEl.textContent = 'Введите корректные значения.';
+            return;
+        }
+
+        const totalAmount = Math.ceil(num / 0.7); // сколько нужно потратить
+        const fullCount = Math.floor(totalAmount / balanceRobux); // сколько полных геймпасов можно купить
+        const remainder = totalAmount % balanceRobux;
+
+        if (totalAmount > balanceRobux) {
+            const altCount = Math.ceil(totalAmount / balanceRobux);
+            const altPrice = Math.ceil(totalAmount / altCount);
+
+            msg += `Вариант 1:\nУкажите цену геймпаса = ${altPrice}, я куплю его ${altCount} раз(а).\n\n`;
+
+            if (remainder > 0 && fullCount > 0) {
+                msg += `Вариант 2:\nУкажите цену геймпаса = ${balanceRobux}, я куплю его ${fullCount} раз(а) и еще один геймпас за ${remainder}.\n\n`;
+            }
+
+            msg += `Общая сумма: ${totalAmount}\nВы получите: ${Math.ceil(totalAmount * 0.7)}`;
+        } else {
+            msg = `Укажите цену геймпаса = ${totalAmount}`;
+        }
+
+        resultEl.textContent = msg;
+    }
+
+    numInput.addEventListener('input', calculate);
+    balanceInput.addEventListener('input', calculate);
+
+    resultEl.addEventListener('click', () => {
+        const text = resultEl.textContent.trim();
+        if (text && text !== 'Введите корректные значения.') {
+            navigator.clipboard.writeText(text)
+                .then(() => console.log('Скопировано:\n' + text))
+                .catch(err => console.error('Ошибка копирования:', err));
+        }
+    });
+
+        // --- Поиск геймпассов ---
+        async function findGamepasses() {
+            const nickname = document.getElementById('nickname').value.trim();
+            const res = await fetch('/find-gamepasses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nickname })
+            });
+
+            const output = document.getElementById('output');
+            output.innerHTML = '';
+
+            if (!res.ok) {
+                output.textContent = await res.text();
+                return;
+            }
+
+            const data = await res.json();
+            if (!data.result.length) {
+                output.textContent = '❌ Ничего не найдено';
+                return;
+            }
+
+            // если это одна ссылка для создания
+            if (data.result.length === 1 && data.result[0].includes('/passes/create')) {
+                const link = data.result[0];
+
+                const container = document.createElement('div');
+                container.className = 'gp-line';
+
+                const linkEl = document.createElement('a');
+                linkEl.className = 'link-part';
+                linkEl.textContent = 'Создать геймпасс';
+                linkEl.href = link;
+                linkEl.target = '_blank';
+                linkEl.rel = 'noopener noreferrer';
+
+                linkEl.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    const message = `Создайте геймпас по ссылке:\n${link}`;
+                    navigator.clipboard.writeText(message);
+                    linkEl.style.background = '#bdf5ff';
+                });
+
+
+                container.appendChild(linkEl);
+                output.appendChild(container);
+                return;
+            }
+
+
+            data.result.forEach(line => {
+                const parts = line.split('\n').map(part => part.trim()).filter(Boolean);
+                if (parts.length < 2) return;
+
+                const link1Raw = parts[0];
+                const link2Raw = parts[1];
+                const priceMatch = link1Raw.match(/–\s*(\d+)\s*R\$?/);
+                const price = priceMatch ? priceMatch[1] : '0';
+                const cleanLink1 = link1Raw.split('–')[0].trim();
+
+                const container = document.createElement('div');
+                container.className = 'gp-line';
+
+                const link1El = document.createElement('a');
+                link1El.className = 'link-part';
+                link1El.textContent = cleanLink1;
+                link1El.href = cleanLink1;
+                link1El.target = '_blank';
+                link1El.rel = 'noopener noreferrer';
+                link1El.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    navigator.clipboard.writeText(cleanLink1);
+                    link1El.style.background = '#bdf5ff';
+                });
+
+                const priceEl = document.createElement('span');
+                priceEl.className = 'price-part';
+                priceEl.textContent = `${price}R$`;
+                priceEl.addEventListener('click', () => {
+                    navigator.clipboard.writeText(price);
+                    priceEl.style.background = '#ffd6d6';
+                });
+                priceEl.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    navigator.clipboard.writeText(price);
+                    priceEl.style.background = '#ffd6d6';
+                });
+
+                const link2El = document.createElement('a');
+                link2El.className = 'link-part';
+                link2El.textContent = link2Raw;
+                link2El.href = link2Raw;
+                link2El.target = '_blank';
+                link2El.rel = 'noopener noreferrer';
+                link2El.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    navigator.clipboard.writeText(link2Raw);
+                    link2El.style.background = '#bdf5ff';
+                });
+
+                container.appendChild(link1El);
+                container.appendChild(document.createTextNode(' – '));
+                container.appendChild(priceEl);
+                container.appendChild(document.createElement('br'));
+                container.appendChild(link2El);
+
+                output.appendChild(container);
+            });
+        }
+    </script>
+</body>
+
+</html>
